@@ -1,0 +1,35 @@
+#!/bin/bash
+path0=$(cd "$(dirname "$0")";pwd)
+domain="$1"
+remotehost=youhost
+sslfilepath="/usr/local/nginx/conf/ssl/"
+fullchainfile=${sslfilepath}${domain}/fullchain.cer
+keyfile=${sslfilepath}${domain}/${domain}.key
+newpemfile=${sslfilepath}${domain}/${domain}.pem
+oldpemfile=${sslfilepath}${domain}/${domain}.pem.old
+ 
+[ ! -f ${oldpemfile} ] && cat ${newpemfile} > ${oldpemfile}
+ 
+function tgSend() {
+    echo "$1" 
+}
+ 
+#generate new pem
+if [[ -f "${fullchainfile}" && -f "${keyfile}" ]];then
+    echo -e "$(cat ${fullchainfile})\n\n$(cat ${keyfile})" > ${newpemfile}
+else
+    #file missing 
+    tgSend "${HOSTNAME} missing file $([ ! -f ${fullchainfile} ] && echo ${fullchainfile##*/}) $([ ! -f ${keyfile} ] && echo ${keyfile##*/})"
+    exit 1
+fi
+oldmd5=$(/usr/bin/md5sum ${oldpemfile} | awk '{print $1}')
+newmd5=$(/usr/bin/md5sum ${newpemfile} | awk '{print $1}')
+if [ "${oldmd5}" != "${newmd5}" ];then
+    msg="${HOSTNAME} "
+    /usr/bin/rsync -avzu -e 'ssh -p22' ${newpemfile} ${remotehost}:/etc/haproxy/ >> ${path0}/rsync_ssl.log 2>&1
+    [ $? == 0 ] && msg=${msg}"cer send success. " || msg=${msg}"cer send failed! "
+    /usr/bin/ssh -p22 root@${remotehost} 'service haproxy restart' >> ${path0}/rsync_ssl.log 2>&1
+    [ $? == 0 ] && msg=${msg}"haproxy reload success. " || msg=${msg}"haproxy reload failed! "
+    cat ${newpemfile} > ${oldpemfile}
+    tgSend "${msg}"
+fi
